@@ -1,5 +1,4 @@
 #include "PulseCounter.hpp"
-// #include <Arduino.h> // millis() / micros()
 #include <M5Stack.h>
 #include "esp_log.h"
 #include "esp_err.h"
@@ -10,7 +9,6 @@
 volatile unsigned long PulseCounter::pulseCountSoftware = 0;
 volatile unsigned long PulseCounter::lastPulseTimestamp = 0;
 volatile bool PulseCounter::led_state = false;
-// xQueueHandle pcnt_evt_queue;
 
 static const char *TAG_PCNT = "PulseCounter"; // ログ用タグ
 
@@ -20,30 +18,6 @@ PulseCounter::PulseCounter(int pulse_pin) :
     pcntChannel(PCNT_CHANNEL)
 {}
 
-/*
-// ISR本体 (static)
-void IRAM_ATTR PulseCounter::pcnt_intr_handler(void *arg) {
-    // ESP_EARLY_LOGI(TAG_PCNT, "ISR Entry"); // ISR内ログは極力避ける
-    uint32_t intr_status = PCNT.int_st.val; // ★ PCNT割り込みステータスレジスタ読み込み
-    pcnt_unit_t unit = (pcnt_unit_t)PCNT_UNIT; // このISRが対応するユニット (引数argからも取れるが今回はNULL)
-
-    // if (intr_status & (1 << unit)) { // このユニットからの割り込みか確認
-        // イベントタイプも確認する場合: uint32_t event_status = PCNT.status_unit[unit].val;
-
-        pulseCountSoftware++; // ソフトウェアカウンタをインクリメント
-        lastPulseTimestamp = millis(); // 最後にパルスがあった時刻を記録 (micros()の方が高精度)
-
-        // ハードウェアカウンタをクリアして次のイベントに備える (APIを使用)
-        pcnt_counter_clear(unit);
-
-        // ★ PCNT割り込みステータスフラグをクリア (重要！)
-        PCNT.int_clr.val = (1 << unit);
-        ESP_EARLY_LOGI(TAG_PCNT, "SW count: %lu", pulseCountSoftware); // ISR内ログは極力避ける
-    // }
-    
-    // ESP_EARLY_LOGI(TAG_PCNT, "ISR Exit"); // ISR内ログは極力避ける
-}
-*/
 void IRAM_ATTR PulseCounter::pcnt_intr_handler(void *arg) {
     uint32_t status = 0;
     pcnt_get_event_status(PCNT_UNIT, &status);
@@ -53,11 +27,8 @@ void IRAM_ATTR PulseCounter::pcnt_intr_handler(void *arg) {
     if (status & PCNT_EVT_THRES_1) {
         pulseCountSoftware++;
         lastPulseTimestamp = millis();
-        // lastPulseTimestamp = micros();
-        // ESP_EARLY_LOGI("PCNT", "THRES_1 Event!");
     }
     PCNT.int_clr.val = (1 << PCNT_UNIT);
-    // led_state = !led_state;
 }
 
 bool PulseCounter::begin() {
@@ -100,8 +71,8 @@ bool PulseCounter::begin() {
         .ctrl_gpio_num = PCNT_PIN_NOT_USED,
         .lctrl_mode = PCNT_MODE_KEEP,
         .hctrl_mode = PCNT_MODE_KEEP,
-        .pos_mode = PCNT_COUNT_INC,       // 立ち上がり無視
-        .neg_mode = PCNT_COUNT_DIS,       // ★ 立ち下がりでカウントアップ
+        .pos_mode = PCNT_COUNT_INC,       // 立ち上がりカウントアップ
+        .neg_mode = PCNT_COUNT_DIS,       // 立ち下がり無視
         .counter_h_lim = 1,
         .counter_l_lim = 0,
         .unit = pcntUnit,
@@ -177,8 +148,8 @@ void PulseCounter::resetPulseCount() {
     pulseCountSoftware = 0;
     lastPulseTimestamp = 0;
     interrupts();
-    pcnt_counter_pause(pcntUnit);
+    /* pcnt_counter_pause(pcntUnit);
     pcnt_counter_clear(pcntUnit);
-    pcnt_counter_resume(pcntUnit);
+    pcnt_counter_resume(pcntUnit); */
     ESP_LOGI(TAG_PCNT, "Software and Hardware pulse counters reset.");
 }
