@@ -152,7 +152,7 @@ The firmware attempts to connect to Wi-Fi in the following order:
 
 ## License
 
-This project is licensed under the **MIT License**. See the `LICENSE` file (or `LICENSE.txt`) in the repository root for the full license text.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file in the repository root for the full license text.
 
 ## Disclaimer
 
