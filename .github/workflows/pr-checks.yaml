@@ -1,0 +1,51 @@
+# Workflowの名前
+name: PR Checks
+
+# Workflowが実行されるトリガー
+on:
+  pull_request: # Pull Requestが作成・更新されたときに実行 (ターゲットブランチ不問)
+    # types: [ opened, synchronize, reopened ] # オプション: トリガーとなるPR操作を限定する場合
+
+# 実行されるジョブの定義
+jobs:
+  # ジョブ1: Semantic Pull Request タイトルチェック
+  semantic-pr-check:
+    name: Semantic PR Check          # ジョブの表示名
+    runs-on: ubuntu-latest         # 実行環境 (Ubuntu)
+    steps:                           # ジョブ内のステップ
+      - name: Validate PR title      # ステップ名
+        uses: amannn/action-semantic-pull-request@v5 # 使用するアクション
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # アクションが必要とするGitHubトークン
+
+  # ジョブ2: PlatformIO ビルドチェック
+  platformio-build:
+    name: PlatformIO Build Check     # ジョブの表示名
+    # オプション: semantic-pr-check が成功した場合のみ実行する依存関係
+    needs: semantic-pr-check
+    runs-on: ubuntu-latest         # 実行環境 (Ubuntu)
+    steps:                           # ジョブ内のステップ
+      # Step 1: リポジトリのコードをチェックアウト
+      - name: Checkout code
+        uses: actions/checkout@v4 # GitHub標準のアクション
+
+      # Step 2: Pythonのセットアップ (PlatformIOに必要)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9' # PlatformIOがサポートするバージョンを指定
+
+      # Step 3: PlatformIO Coreのインストール
+      - name: Install PlatformIO Core
+        run: pip install -U platformio # pipでPlatformIOをインストール/更新
+
+      # Step 4: PlatformIOライブラリのインストール
+      # platformio.ini に基づいて依存関係をインストール
+      # キャッシュを使うと高速化可能 (詳細はGitHub Actionsのドキュメント参照)
+      - name: Install PlatformIO Libraries
+        run: pio pkg install
+
+      # Step 5: PlatformIOでビルドを実行
+      # platformio.ini のデフォルト環境 ([env:m5stack-core-esp32]) でビルド
+      - name: Build project
+        run: pio run
