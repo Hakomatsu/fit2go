@@ -10,14 +10,15 @@
 class MetricsCalculator {
 public:
     MetricsCalculator(PulseCounter& pc, Storage& storage);
-    void begin(); // 初期化 (累積データロード含む)
-    void update(unsigned long currentMillis); // メトリクス更新処理
+    void begin(DriveType type); // 初期化 (累積データロード含む)
+    bool update(unsigned long currentMillis); // メトリクス更新処理
     void resetSession(); // 現在のセッションデータのみリセット
     const TrackerData& getData() const; // 計算済みデータを取得
     bool isMoving() const; // SLEEP_TIMEOUT_MS 以内か (活動中か)
     bool isTimerRunning() const; // ★ 追加: TIMER_STOP_DELAY_MS 以内か (タイマー動作中か) ★
     void saveCumulativeData(); // (現状未使用) NVSへの累積データ保存用だった名残
     unsigned long getLastPulseObservedMs() const; // 最後にパルスを観測した時刻
+    void stoppingDataUpdate();
 
 private:
     PulseCounter& pulseCounter; // パルスカウンターへの参照
@@ -30,6 +31,11 @@ private:
 
     bool moving;        // SLEEP_TIMEOUT_MS 以内にパルスがあったか
     bool timer_running; // TIMER_STOP_DELAY_MS 以内にパルスがあったか
+    DriveType drive_type;
+
+    float lastValidRpm;
+    float lastValidSpeedKmh;
+    float lastValidMets;
 
     // 内部計算用メソッド
     void calculateMetrics(unsigned long intervalPulses, unsigned long intervalMs);

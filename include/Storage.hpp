@@ -25,6 +25,7 @@ public:
     bool getWifiCredential(int index, String& ssid, String& pass); // パース結果からWiFi情報を取得
     String getEndpointUrl(); // パース結果からURLを取得
     int getWifiCredentialCount(); // パース結果のWiFi情報数を取得
+    DriveType getDriveType();
 
     // --- NVS 関連 (WiFi用) ---
     bool loadCredentialsFromNVS(String& ssid, String& pass); // ★ NVSからのみ読み込み ★
@@ -47,6 +48,7 @@ private: // ★★★ private セクション ★★★
     bool configLoaded; // 設定ファイルがロード・パースされたか
     String endpointUrlFromJson; // JSONから読み込んだURL
     std::vector<std::pair<String, String>> wifiCredentials; // SSIDとPasswordのペアを格納
+    DriveType drive_type;
 };
 
 #endif // STORAGE_HPP
