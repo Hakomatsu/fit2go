@@ -7,7 +7,7 @@
 #include "Display.hpp"
 #include "WifiManager.hpp"
 #include "DataPublisher.hpp"
-#include "APConfigPortal.hpp" // ★ APConfigPortal ヘッダー ★
+#include "APConfigPortal.hpp" // APConfigPortal ヘッダー
 #include "esp_sleep.h"
 #include "esp_err.h"
 #include "driver/pcnt.h" // デバッグログ用
@@ -22,10 +22,11 @@ MetricsCalculator metrics(pulseCounter, storage);
 Display display;
 WifiManager wifi(storage);
 DataPublisher publisher(wifi);
-APConfigPortal apPortal(storage, wifi); // ★ APConfigPortal オブジェクト生成 ★
+APConfigPortal apPortal(storage, wifi); // APConfigPortal オブジェクト生成
 
 // --- Global State ---
 AppState currentState = AppState::INITIALIZING;
+DriveType drive_type = DriveType::TIMER_DRIVEN;
 // bool sessionActive = false; // ★ 削除: currentState で管理 ★
 unsigned long lastDebugPrintTime = 0;
 bool timeSynchronized = false; // ★ NTP同期済みフラグを追加 ★
@@ -119,13 +120,15 @@ void setup() {
         delay(2000); // 警告表示時間
     }
 
+    drive_type = storage.getDriveType();
+
     // PublisherにURLを渡す (Storageから取得)
     String endpointUrl = storage.getEndpointUrl();
-    publisher.begin(endpointUrl); // URLが空でもエラーにはならない
+    publisher.begin(endpointUrl, drive_type); // URLが空でもエラーにはならない
 
     if (!pulseCounter.begin()) { display.showMessage("PCNT Init FAIL!", 2); delay(3000); /* 必要なら停止 */ }
 
-    metrics.begin(); // 累積データロード (SDから) & セッションリセット
+    metrics.begin(drive_type); // 累積データロード (SDから) & セッションリセット
 
     wifi.begin();    // WiFi初期化 (自動接続試行 NVS->JSON[0])
 
@@ -168,7 +171,7 @@ void loop() {
     } else {
         // --- APモードでない場合の通常処理 ---
         wifi.updateStatus(); // WiFi接続状態更新 (STAモード時)
-        metrics.update(currentMillis); // 計測データ更新 (isMoving, isTimerRunning がここで更新される)
+        bool data_updated = metrics.update(currentMillis); // 計測データ更新 (isMoving, isTimerRunning がここで更新される)
 
         // ★★★ Wi-Fi接続時にNTP同期を試みる ★★★
         if (wifi.isConnected()) {
@@ -184,15 +187,29 @@ void loop() {
         // ★ 状態遷移ロジックを各ハンドラに移動 ★
         // 状態別ハンドラ呼び出し
         switch (currentState) {
-            case AppState::IDLE_DISPLAY:      handleIdleState(currentMillis);       break;
-            case AppState::TRACKING_DISPLAY:  handleTrackingState(currentMillis);   break;
-            case AppState::STOPPING:          handleStoppingState(currentMillis);   break; // ★ STOPPINGハンドラ呼び出し ★
-            case AppState::WIFI_SETUP:        handleWifiSetupState(currentMillis);  break;
-            case AppState::WIFI_CONNECTING:   handleWifiConnectingState(currentMillis); break;
-            case AppState::WIFI_SCANNING:     handleWifiScanningState(currentMillis); break;
+            case AppState::IDLE_DISPLAY:
+                handleIdleState(currentMillis);
+                break;
+            case AppState::TRACKING_DISPLAY:
+                handleTrackingState(currentMillis);
+                break;
+            case AppState::STOPPING:
+                handleStoppingState(currentMillis);  // ★ STOPPINGハンドラ呼び出し ★
+                break;
+            case AppState::WIFI_SETUP:
+                handleWifiSetupState(currentMillis);
+                break;
+            case AppState::WIFI_CONNECTING:
+                handleWifiConnectingState(currentMillis);
+                break;
+            case AppState::WIFI_SCANNING:
+                handleWifiScanningState(currentMillis);
+                break;
             // WIFI_AP_CONFIG は isActive() で処理される
-            case AppState::SLEEPING:          /* スリープ移行処理は loop の最後で */ break;
-            case AppState::INITIALIZING:      /* 通常ここには来ない */               break;
+            case AppState::SLEEPING:          /* スリープ移行処理は loop の最後で */
+                break;
+            case AppState::INITIALIZING:      /* 通常ここには来ない */
+                break;
             default:
                  // 不明な状態になったらアイドルに戻すなど
                  Serial.printf("Warning: Unknown AppState %d. Resetting to IDLE.\n", (int)currentState);
@@ -202,7 +219,15 @@ void loop() {
 
         // ★ データ送信条件を TRACKING_DISPLAY のみに変更 ★
         if (currentState == AppState::TRACKING_DISPLAY && wifi.isConnected()) {
-            publisher.publishIfNeeded(metrics.getData());
+            if (drive_type == DriveType::EVENT_DRIVEN)
+                if (data_updated){
+                    publisher.publishIfNeeded(metrics.getData());
+                    data_updated = false;
+                }
+            if (drive_type == DriveType::TIMER_DRIVEN){
+                // Serial.printf("Timer driven publish.\n");
+                publisher.publishIfNeeded(metrics.getData());
+            }
         }
 
         // スリープ移行判定 (Idle状態でのみ)
@@ -249,7 +274,6 @@ void loop() {
                                  lastPulseTimestampFromCounter, lastPulseTimestampFromMetrics,
                                  (int)currentState, wifi.isConnected(), timeSynchronized);
              }
-             Serial.printf("Current State: %d\n", currentState);
              lastDebugPrintTime = currentMillis;
          }
 
@@ -291,6 +315,8 @@ void handleTrackingState(unsigned long currentMillis) {
     // ★ タイマーが停止したら STOPPING に遷移 ★
     if (!metrics.isTimerRunning()) { // isTimerRunning()は TIMER_STOP_DELAY 以内かを見る
         Serial.println("Main: Timer stopped in TRACKING. Entering STOPPING.");
+        metrics.stoppingDataUpdate();
+        publisher.publishIfNeeded(metrics.getData());
         currentState = AppState::STOPPING;
         return; // 状態遷移
     }
@@ -298,7 +324,7 @@ void handleTrackingState(unsigned long currentMillis) {
     // ボタン処理
     if (M5.BtnB.pressedFor(1000)) { // B長押しでセッションリセット -> IDLE へ
         Serial.println("Main: Manual Session Reset requested during TRACKING.");
-        metrics.resetSession(); // セッションデータとパルスカウンタをリセット
+        metrics.resetSession(); // セッションデータとパルスカウンタ基準値をリセット
         currentState = AppState::IDLE_DISPLAY;
     } else if (M5.BtnC.wasPressed()) { // CでWiFi設定へ
         currentState = AppState::WIFI_SETUP;
@@ -306,7 +332,7 @@ void handleTrackingState(unsigned long currentMillis) {
     }
 }
 
-// ★★★ STOPPING 状態のハンドラを追加 ★★★
+// ★★★ STOPPING 状態のハンドラ ★★★
 void handleStoppingState(unsigned long currentMillis) {
     // ★ 動きが完全に止まったら(SLEEP_TIMEOUT経過) IDLE に遷移 ★
     if (!metrics.isMoving()) {
@@ -367,13 +393,16 @@ void handleWifiSetupState(unsigned long currentMillis) {
          }
          Serial.println("Main: Exiting WiFi Setup via BtnC.");
     }
-     // YAMLからの接続試行ボタンなどをBtnB長押しなどに割り当てることも可能
+     // JSONからの接続試行ボタンなどをBtnB長押しなどに割り当てることも可能
      else if (M5.BtnB.pressedFor(1000)) { // 例: B長押しでJSON[0]に接続試行
          if (storage.getWifiCredentialCount() > 0) {
              Serial.println("Main: Attempting WiFi connection from JSON[0]...");
              display.showMessage("Connecting(JSON)...", 1, false);
              currentState = AppState::WIFI_CONNECTING;
-             wifi.connectFromYaml(0); // JSONの最初の設定で接続
+             // wifi.connectFromYaml(0); // 古い名前だった
+             wifi.connectFromYaml(0); // JSONの最初の設定で接続 (関数名はYamlのままだが内部はJSONを読む)
+                                      // connect()を呼ぶ方がNVS->JSON[0]の順で試すので良いかも
+             // wifi.connect();
          } else {
              display.showMessage("No WiFi in JSON", 1, true); delay(1000);
          }

@@ -5,7 +5,11 @@
 // これにより、Storage.cpp 内からこの関数を呼び出せるようになる
 extern uint64_t getCurrentTimestampMs();
 
-Storage::Storage() : sdCardOk(false), configLoaded(false) {}
+Storage::Storage() : 
+    sdCardOk(false),
+    configLoaded(false),
+    drive_type(DriveType::TIMER_DRIVEN)
+{}
 
 // begin
 bool Storage::begin() {
@@ -87,6 +91,16 @@ bool Storage::loadConfigFromJson() {
 
     // --- データの抽出 ---
 
+    // 駆動タイプ
+    if (doc["drive_type"].is<const char*>()) {
+        String drive_type_str = doc["drive_type"].as<String>();
+        Serial.printf("Drive Type: %s\n", drive_type_str.c_str());
+        if(drive_type_str == "event")
+            drive_type = DriveType::EVENT_DRIVEN;
+        else
+            drive_type = DriveType::TIMER_DRIVEN;
+    }
+
     // エンドポイントURL
     if (doc["endpoint_url"].is<const char*>()) {
         endpointUrlFromJson = doc["endpoint_url"].as<String>();
@@ -156,6 +170,10 @@ int Storage::getWifiCredentialCount() {
      return wifiCredentials.size();
 }
 
+// JSONパース結果の駆動タイプ情報を取得
+DriveType Storage::getDriveType(){
+    return drive_type;
+}
 
 // --- NVS 関連 (WiFi用) ---
 bool Storage::loadCredentialsFromNVS(String& ssid, String& pass) {
